@@ -6,15 +6,14 @@ const jwt = require('jsonwebtoken');
 const register = async (req, res) => {
     const { username, email, password, nom_complet } = req.body;
 
-
     try {
         // Vérifier si l'utilisateur existe déjà
-        const [existing] = await db.query(
-            'SELECT * FROM users WHERE email = ? OR username = ?',
+        const existingResult = await db.query(
+            'SELECT * FROM users WHERE email = $1 OR username = $2',
             [email, username]
         );
 
-        if (existing.length > 0) {
+        if (existingResult.rows.length > 0) {
             return res.status(400).json({ error: 'Email ou nom d\'utilisateur déjà utilisé' });
         }
 
@@ -23,17 +22,22 @@ const register = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, salt);
 
         // Insérer l'utilisateur
-        const [result] = await db.query(
-            'INSERT INTO users (username, email, password, nom_complet) VALUES (?, ?, ?, ?)',
+        const result = await db.query(
+            `INSERT INTO users (username, email, password, nom_complet) 
+             VALUES ($1, $2, $3, $4) 
+             RETURNING id`,
             [username, email, hashedPassword, nom_complet]
         );
 
-
         res.status(201).json({ 
             message: 'Utilisateur créé avec succès',
-            userId: result.insertId
+            userId: result.rows[0].id
         });
     } catch (error) {
+        // Gérer les erreurs spécifiques PostgreSQL
+        if (error.code === '23505') {  // Violation d'unicité
+            return res.status(400).json({ error: 'Email ou nom d\'utilisateur déjà utilisé' });
+        }
         res.status(500).json({ error: 'Erreur lors de l\'inscription: ' + error.message });
     }
 };
@@ -42,18 +46,17 @@ const register = async (req, res) => {
 const login = async (req, res) => {
     const { email, password } = req.body;
 
-
     try {
-        const [users] = await db.query(
-            'SELECT * FROM users WHERE email = ?',
+        const result = await db.query(
+            'SELECT * FROM users WHERE email = $1',
             [email]
         );
 
-        if (users.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
         }
 
-        const user = users[0];
+        const user = result.rows[0];
 
         // Vérifier le mot de passe
         const validPassword = await bcrypt.compare(password, user.password);
@@ -68,7 +71,6 @@ const login = async (req, res) => {
             process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
-
 
         res.json({
             token,
@@ -87,16 +89,16 @@ const login = async (req, res) => {
 // Récupérer le profil
 const getProfile = async (req, res) => {
     try {
-        const [users] = await db.query(
-            'SELECT id, username, email, nom_complet, created_at FROM users WHERE id = ?',
+        const result = await db.query(
+            'SELECT id, username, email, nom_complet, created_at FROM users WHERE id = $1',
             [req.userId]
         );
 
-        if (users.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Utilisateur non trouvé' });
         }
 
-        res.json(users[0]);
+        res.json(result.rows[0]);
     } catch (error) {
         res.status(500).json({ error: 'Erreur lors de la récupération du profil' });
     }

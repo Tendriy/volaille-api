@@ -5,24 +5,26 @@ class Vente {
     // Enregistrer une vente
     static async create(venteData) {
         const { lot_id, nombre_vendu, prix_unitaire, date_vente, acheteur } = venteData;
-        const [result] = await db.query(
-            'INSERT INTO ventes (lot_id, nombre_vendu, prix_unitaire, date_vente, acheteur) VALUES (?, ?, ?, ?, ?)',
+        const result = await db.query(
+            `INSERT INTO ventes (lot_id, nombre_vendu, prix_unitaire, date_vente, acheteur) 
+             VALUES ($1, $2, $3, $4, $5) 
+             RETURNING id`,
             [lot_id, nombre_vendu, prix_unitaire, date_vente, acheteur || null]
         );
-        return result.insertId;
+        return result.rows[0].id;
     }
 
     // Récupérer toutes les ventes d'un utilisateur
     static async findAllByUser(userId) {
-        const [ventes] = await db.query(
+        const result = await db.query(
             `SELECT v.*, l.nom_lot 
              FROM ventes v 
              JOIN lots l ON v.lot_id = l.id 
-             WHERE l.user_id = ?
+             WHERE l.user_id = $1
              ORDER BY v.date_vente DESC`,
             [userId]
         );
-        return ventes;
+        return result.rows;
     }
 
     // Récupérer les ventes par lot
@@ -31,40 +33,40 @@ class Vente {
             SELECT v.*, l.nom_lot 
             FROM ventes v 
             JOIN lots l ON v.lot_id = l.id 
-            WHERE v.lot_id = ?
+            WHERE v.lot_id = $1
         `;
         const params = [lotId];
         
         if (userId) {
-            query += ' AND l.user_id = ?';
+            query += ' AND l.user_id = $2';
             params.push(userId);
         }
         
         query += ' ORDER BY v.date_vente DESC';
         
-        const [ventes] = await db.query(query, params);
-        return ventes;
+        const result = await db.query(query, params);
+        return result.rows;
     }
 
     // Récupérer le total des ventes d'un lot
     static async getTotalVendusByLotId(lotId) {
-        const [result] = await db.query(
-            'SELECT SUM(nombre_vendu) as total_vendus FROM ventes WHERE lot_id = ?',
+        const result = await db.query(
+            'SELECT COALESCE(SUM(nombre_vendu), 0) as total_vendus FROM ventes WHERE lot_id = $1',
             [lotId]
         );
-        return result[0].total_vendus || 0;
+        return parseInt(result.rows[0].total_vendus) || 0;
     }
 
     // Calculer le chiffre d'affaires total
     static async getChiffreAffairesTotal(userId) {
-        const [result] = await db.query(
-            `SELECT SUM(v.nombre_vendu * v.prix_unitaire) as total
+        const result = await db.query(
+            `SELECT COALESCE(SUM(v.nombre_vendu * v.prix_unitaire), 0) as total
              FROM ventes v 
              JOIN lots l ON v.lot_id = l.id 
-             WHERE l.user_id = ?`,
+             WHERE l.user_id = $1`,
             [userId]
         );
-        return result[0].total || 0;
+        return parseFloat(result.rows[0].total) || 0;
     }
 
     // Obtenir les statistiques complètes
@@ -72,7 +74,7 @@ class Vente {
         const ventes = await this.findAllByUser(userId);
         
         const caTotal = ventes.reduce((total, vente) => {
-            return total + (vente.nombre_vendu * vente.prix_unitaire);
+            return total + (vente.nombre_vendu * parseFloat(vente.prix_unitaire));
         }, 0);
         
         const ventesMensuelles = calculVentesMensuelles(ventes);

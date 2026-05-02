@@ -8,19 +8,23 @@ class Lot {
     // Créer un lot
     static async create(lotData) {
         const { user_id, nom_lot, race, fournisseur, nombre_initial, date_arrivee } = lotData;
-        const [result] = await db.query(
-            'INSERT INTO lots (user_id, nom_lot, race, fournisseur, nombre_initial, date_arrivee) VALUES (?, ?, ?, ?, ?, ?)',
+        const result = await db.query(
+            `INSERT INTO lots (user_id, nom_lot, race, fournisseur, nombre_initial, date_arrivee) 
+             VALUES ($1, $2, $3, $4, $5, $6) 
+             RETURNING id`,
             [user_id, nom_lot, race, fournisseur, nombre_initial, date_arrivee]
         );
-        return result.insertId;
+        return result.rows[0].id;
     }
 
     // Trouver tous les lots d'un utilisateur avec calculs complets
     static async findAllByUser(userId) {
-        const [lots] = await db.query(
-            'SELECT * FROM lots WHERE user_id = ? ORDER BY created_at DESC',
+        const result = await db.query(
+            'SELECT * FROM lots WHERE user_id = $1 ORDER BY created_at DESC',
             [userId]
         );
+        
+        const lots = result.rows;
 
         // Ajouter les calculs pour chaque lot
         for (let lot of lots) {
@@ -47,14 +51,14 @@ class Lot {
 
     // Trouver un lot par ID
     static async findById(id, userId) {
-        const [lots] = await db.query(
-            'SELECT * FROM lots WHERE id = ? AND user_id = ?',
+        const result = await db.query(
+            'SELECT * FROM lots WHERE id = $1 AND user_id = $2',
             [id, userId]
         );
 
-        if (lots.length === 0) return null;
+        if (result.rows.length === 0) return null;
 
-        const lot = lots[0];
+        const lot = result.rows[0];
         const stats = await Suivi.getStatsByLotId(lot.id);
         const totalMorts = stats.total_morts || 0;
         const totalVendus = await Vente.getTotalVendusByLotId(lot.id);
@@ -90,38 +94,44 @@ class Lot {
     // Mettre à jour un lot
     static async update(id, userId, lotData) {
         const { nom_lot, race, fournisseur, nombre_initial, statut } = lotData;
-        const [result] = await db.query(
-            'UPDATE lots SET nom_lot=?, race=?, fournisseur=?, nombre_initial=?, statut=? WHERE id=? AND user_id=?',
+        const result = await db.query(
+            `UPDATE lots 
+             SET nom_lot = $1, race = $2, fournisseur = $3, nombre_initial = $4, statut = $5, updated_at = CURRENT_TIMESTAMP 
+             WHERE id = $6 AND user_id = $7`,
             [nom_lot, race, fournisseur, nombre_initial, statut, id, userId]
         );
-        return result.affectedRows > 0;
+        return result.rowCount > 0;
     }
 
     // Supprimer un lot
     static async delete(id, userId) {
-        const [result] = await db.query(
-            'DELETE FROM lots WHERE id = ? AND user_id = ?',
+        const result = await db.query(
+            'DELETE FROM lots WHERE id = $1 AND user_id = $2',
             [id, userId]
         );
-        return result.affectedRows > 0;
+        return result.rowCount > 0;
     }
 
     // Clôturer un lot
     static async cloturer(id, userId) {
-        const [result] = await db.query(
-            'UPDATE lots SET statut="cloture" WHERE id=? AND user_id=? AND statut="actif"',
+        const result = await db.query(
+            `UPDATE lots 
+             SET statut = 'cloture', updated_at = CURRENT_TIMESTAMP 
+             WHERE id = $1 AND user_id = $2 AND statut = 'actif'`,
             [id, userId]
         );
-        return result.affectedRows > 0;
+        return result.rowCount > 0;
     }
 
     // Obtenir les lots actifs d'un utilisateur
     static async findActiveByUser(userId) {
-        const [lots] = await db.query(
-            'SELECT * FROM lots WHERE user_id = ? AND statut = "actif" ORDER BY created_at DESC',
-            [userId]
+        const result = await db.query(
+            'SELECT * FROM lots WHERE user_id = $1 AND statut = $2 ORDER BY created_at DESC',
+            [userId, 'actif']
         );
 
+        const lots = result.rows;
+        
         for (let lot of lots) {
             lot.age = calculerAge(lot.date_arrivee);
         }
@@ -131,11 +141,11 @@ class Lot {
 
     // Compter les lots actifs d'un utilisateur
     static async countActive(userId) {
-        const [result] = await db.query(
-            'SELECT COUNT(*) as count FROM lots WHERE user_id = ? AND statut = "actif"',
-            [userId]
+        const result = await db.query(
+            'SELECT COUNT(*) as count FROM lots WHERE user_id = $1 AND statut = $2',
+            [userId, 'actif']
         );
-        return result[0].count;
+        return parseInt(result.rows[0].count);
     }
 
     // Compter le nombre total de volailles actives

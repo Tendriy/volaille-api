@@ -9,10 +9,11 @@ const getDashboardData = async (req, res) => {
 
     try {
         // 1. Récupérer tous les lots
-        const [lots] = await db.query(
-            'SELECT * FROM lots WHERE user_id = ?',
+        const lotsResult = await db.query(
+            'SELECT * FROM lots WHERE user_id = $1',
             [userId]
         );
+        const lots = lotsResult.rows;
 
         // 2. Compter les lots actifs
         const lotsActifs = lots.filter(lot => lot.statut === 'actif').length;
@@ -21,17 +22,17 @@ const getDashboardData = async (req, res) => {
         let totalVolailles = 0;
         for (const lot of lots) {
             if (lot.statut === 'actif') {
-                const [morts] = await db.query(
-                    'SELECT SUM(mortalite_jour) as total_morts FROM suivi_quotidien WHERE lot_id = ?',
+                const mortsResult = await db.query(
+                    'SELECT COALESCE(SUM(mortalite_jour), 0) as total_morts FROM suivi_quotidien WHERE lot_id = $1',
                     [lot.id]
                 );
-                const [ventes] = await db.query(
-                    'SELECT SUM(nombre_vendu) as total_vendus FROM ventes WHERE lot_id = ?',
+                const ventesResult = await db.query(
+                    'SELECT COALESCE(SUM(nombre_vendu), 0) as total_vendus FROM ventes WHERE lot_id = $1',
                     [lot.id]
                 );
                 
-                const totalMorts = morts[0].total_morts || 0;
-                const totalVendus = ventes[0].total_vendus || 0;
+                const totalMorts = parseInt(mortsResult.rows[0].total_morts) || 0;
+                const totalVendus = parseInt(ventesResult.rows[0].total_vendus) || 0;
                 const restant = lot.nombre_initial - totalMorts - totalVendus;
                 
                 if (restant > 0) {
@@ -41,10 +42,11 @@ const getDashboardData = async (req, res) => {
         }
 
         // 4. Compter les alertes stock
-        const [stock] = await db.query(
-            'SELECT * FROM stock_aliment WHERE user_id = ?',
+        const stockResult = await db.query(
+            'SELECT * FROM stock_aliment WHERE user_id = $1',
             [userId]
         );
+        const stock = stockResult.rows;
         let alertesStock = 0;
         for (const item of stock) {
             if (item.quantite <= item.seuil_alerte) {
@@ -53,14 +55,14 @@ const getDashboardData = async (req, res) => {
         }
 
         // 5. Compter les vaccins programmés
-        const [vaccins] = await db.query(
+        const vaccinsResult = await db.query(
             `SELECT v.* FROM vaccinations v 
              JOIN lots l ON v.lot_id = l.id 
-             WHERE l.user_id = ? AND v.statut = 'programme' 
-             AND v.date_programmee >= CURDATE()`,
+             WHERE l.user_id = $1 AND v.statut = 'programme' 
+             AND v.date_programmee >= CURRENT_DATE`,
             [userId]
         );
-        const vaccinsProgrammes = vaccins.length;
+        const vaccinsProgrammes = vaccinsResult.rows.length;
 
         // 6. Retourner les données
         res.json({
@@ -71,6 +73,7 @@ const getDashboardData = async (req, res) => {
         });
 
     } catch (error) {
+        console.error('Erreur dashboard:', error);
         res.status(500).json({ error: 'Erreur lors de la récupération des données du tableau de bord' });
     }
 };
@@ -80,17 +83,18 @@ const getRecentLots = async (req, res) => {
     const userId = req.userId;
 
     try {
-        const [lots] = await db.query(
-            'SELECT * FROM lots WHERE user_id = ? ORDER BY created_at DESC LIMIT 5',
+        const lotsResult = await db.query(
+            'SELECT * FROM lots WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5',
             [userId]
         );
+        const lots = lotsResult.rows;
 
         for (let lot of lots) {
-            const [morts] = await db.query(
-                'SELECT SUM(mortalite_jour) as total_morts FROM suivi_quotidien WHERE lot_id = ?',
+            const mortsResult = await db.query(
+                'SELECT COALESCE(SUM(mortalite_jour), 0) as total_morts FROM suivi_quotidien WHERE lot_id = $1',
                 [lot.id]
             );
-            const totalMorts = morts[0].total_morts || 0;
+            const totalMorts = parseInt(mortsResult.rows[0].total_morts) || 0;
             lot.taux_mortalite = ((totalMorts / lot.nombre_initial) * 100).toFixed(2);
             
             const arrivee = new Date(lot.date_arrivee);
@@ -102,6 +106,7 @@ const getRecentLots = async (req, res) => {
         res.json(lots);
 
     } catch (error) {
+        console.error('Erreur lots récents:', error);
         res.status(500).json({ error: 'Erreur lors de la récupération des lots récents' });
     }
 };
@@ -111,10 +116,11 @@ const getAlertes = async (req, res) => {
     const userId = req.userId;
 
     try {
-        const [stock] = await db.query(
-            'SELECT * FROM stock_aliment WHERE user_id = ?',
+        const stockResult = await db.query(
+            'SELECT * FROM stock_aliment WHERE user_id = $1',
             [userId]
         );
+        const stock = stockResult.rows;
         
         const alertesStock = stock.filter(item => item.quantite <= item.seuil_alerte).map(item => ({
             ...item,
@@ -122,19 +128,19 @@ const getAlertes = async (req, res) => {
             message_alerte: item.quantite <= item.seuil_alerte ? "ATTENTION : Stock faible" : "Stock suffisant"
         }));
 
-        const [vaccins] = await db.query(
+        const vaccinsResult = await db.query(
             `SELECT v.*, l.nom_lot 
              FROM vaccinations v 
              JOIN lots l ON v.lot_id = l.id 
-             WHERE l.user_id = ? 
+             WHERE l.user_id = $1 
              AND v.statut = 'programme'
-             AND v.date_programmee >= CURDATE()
-             AND v.date_programmee <= DATE_ADD(CURDATE(), INTERVAL 3 DAY)`,
-            [userId]
+             AND v.date_programmee >= CURRENT_DATE
+             AND v.date_programmee <= CURRENT_DATE + $2 * INTERVAL '1 day'`,
+            [userId, 3]
         );
 
         const aujourdhui = new Date();
-        const alertesVaccins = vaccins.map(vaccin => {
+        const alertesVaccins = vaccinsResult.rows.map(vaccin => {
             const dateProgrammee = new Date(vaccin.date_programmee);
             const diffJours = Math.ceil((dateProgrammee - aujourdhui) / (1000 * 60 * 60 * 24));
             return {
@@ -149,6 +155,7 @@ const getAlertes = async (req, res) => {
         });
 
     } catch (error) {
+        console.error('Erreur alertes:', error);
         res.status(500).json({ error: 'Erreur lors de la récupération des alertes' });
     }
 };
@@ -158,14 +165,15 @@ const getVentesMensuelles = async (req, res) => {
     const userId = req.userId;
 
     try {
-        const [ventes] = await db.query(
+        const ventesResult = await db.query(
             `SELECT v.* FROM ventes v
              JOIN lots l ON v.lot_id = l.id
-             WHERE l.user_id = ?
+             WHERE l.user_id = $1
              ORDER BY v.date_vente`,
             [userId]
         );
 
+        const ventes = ventesResult.rows;
         const ventesParMois = {};
         let chiffreAffairesTotal = 0;
 
@@ -197,52 +205,31 @@ const getMortaliteMensuelle = async (req, res) => {
     const userId = req.userId;
 
     try {
-        // Récupérer tous les lots
-        const [lots] = await db.query(
-            'SELECT * FROM lots WHERE user_id = ?',
+        // Pour PostgreSQL, utiliser TO_CHAR pour formater la date
+        const mortaliteResult = await db.query(
+            `SELECT 
+                TO_CHAR(s.date_suivi, 'YYYY-MM') as mois,
+                COALESCE(SUM(s.mortalite_jour), 0) as total_morts,
+                SUM(l.nombre_initial) as total_initial
+             FROM suivi_quotidien s
+             JOIN lots l ON s.lot_id = l.id
+             WHERE l.user_id = $1
+             GROUP BY TO_CHAR(s.date_suivi, 'YYYY-MM')
+             ORDER BY mois`,
             [userId]
         );
 
-        const mortaliteParMois = {};
-
-        for (const lot of lots) {
-            // Récupérer les mortalités par mois
-            const [mortalites] = await db.query(
-                `SELECT 
-                    DATE_FORMAT(date_suivi, '%Y-%m') as mois,
-                    SUM(mortalite_jour) as total_morts
-                 FROM suivi_quotidien
-                 WHERE lot_id = ?
-                 GROUP BY DATE_FORMAT(date_suivi, '%Y-%m')
-                 ORDER BY mois`,
-                [lot.id]
-            );
-
-            for (const mort of mortalites) {
-                if (!mortaliteParMois[mort.mois]) {
-                    mortaliteParMois[mort.mois] = {
-                        total_morts: 0,
-                        total_initial: 0
-                    };
-                }
-                mortaliteParMois[mort.mois].total_morts += mort.total_morts;
-                mortaliteParMois[mort.mois].total_initial += lot.nombre_initial;
-            }
-        }
-
-        // Calculer les pourcentages
-        const resultats = Object.keys(mortaliteParMois).map(mois => {
-            const data = mortaliteParMois[mois];
-            const taux = data.total_initial > 0 
-                ? ((data.total_morts / data.total_initial) * 100).toFixed(1)
+        const resultats = mortaliteResult.rows.map(item => {
+            const taux = item.total_initial > 0 
+                ? ((item.total_morts / item.total_initial) * 100).toFixed(1)
                 : 0;
             return {
-                mois: mois,
+                mois: item.mois,
                 taux: parseFloat(taux),
-                total_morts: data.total_morts,
-                total_initial: data.total_initial
+                total_morts: parseInt(item.total_morts),
+                total_initial: parseInt(item.total_initial)
             };
-        }).sort((a, b) => a.mois.localeCompare(b.mois));
+        });
 
         res.json(resultats);
 
@@ -258,60 +245,60 @@ const getFullDashboard = async (req, res) => {
 
     try {
         // Exécuter toutes les requêtes en parallèle
-        const [lots, stock, vaccins, ventes, mortaliteMensuelle] = await Promise.all([
-            db.query('SELECT * FROM lots WHERE user_id = ?', [userId]),
-            db.query('SELECT * FROM stock_aliment WHERE user_id = ?', [userId]),
+        const [lotsResult, stockResult, vaccinsResult, ventesResult, mortaliteResult] = await Promise.all([
+            db.query('SELECT * FROM lots WHERE user_id = $1', [userId]),
+            db.query('SELECT * FROM stock_aliment WHERE user_id = $1', [userId]),
             db.query(
                 `SELECT v.* FROM vaccinations v 
                  JOIN lots l ON v.lot_id = l.id 
-                 WHERE l.user_id = ? AND v.statut = 'programme' 
-                 AND v.date_programmee >= CURDATE()`,
+                 WHERE l.user_id = $1 AND v.statut = 'programme' 
+                 AND v.date_programmee >= CURRENT_DATE`,
                 [userId]
             ),
             db.query(
                 `SELECT v.* FROM ventes v
                  JOIN lots l ON v.lot_id = l.id
-                 WHERE l.user_id = ?
+                 WHERE l.user_id = $1
                  ORDER BY v.date_vente`,
                 [userId]
             ),
             db.query(
                 `SELECT 
-                    DATE_FORMAT(s.date_suivi, '%Y-%m') as mois,
-                    SUM(s.mortalite_jour) as total_morts,
+                    TO_CHAR(s.date_suivi, 'YYYY-MM') as mois,
+                    COALESCE(SUM(s.mortalite_jour), 0) as total_morts,
                     SUM(l.nombre_initial) as total_initial
                  FROM suivi_quotidien s
                  JOIN lots l ON s.lot_id = l.id
-                 WHERE l.user_id = ?
-                 GROUP BY DATE_FORMAT(s.date_suivi, '%Y-%m')
+                 WHERE l.user_id = $1
+                 GROUP BY TO_CHAR(s.date_suivi, 'YYYY-MM')
                  ORDER BY mois`,
                 [userId]
             )
         ]);
 
-        const lotsList = lots[0];
-        const stockList = stock[0];
-        const vaccinsList = vaccins[0];
-        const ventesList = ventes[0];
-        const mortaliteList = mortaliteMensuelle[0];
+        const lots = lotsResult.rows;
+        const stock = stockResult.rows;
+        const vaccins = vaccinsResult.rows;
+        const ventes = ventesResult.rows;
+        const mortaliteData = mortaliteResult.rows;
 
         // 1. Lots actifs
-        const lotsActifs = lotsList.filter(lot => lot.statut === 'actif').length;
+        const lotsActifs = lots.filter(lot => lot.statut === 'actif').length;
 
         // 2. Total volailles
         let totalVolailles = 0;
-        for (const lot of lotsList) {
+        for (const lot of lots) {
             if (lot.statut === 'actif') {
-                const [morts] = await db.query(
-                    'SELECT SUM(mortalite_jour) as total_morts FROM suivi_quotidien WHERE lot_id = ?',
+                const mortsResult = await db.query(
+                    'SELECT COALESCE(SUM(mortalite_jour), 0) as total_morts FROM suivi_quotidien WHERE lot_id = $1',
                     [lot.id]
                 );
-                const [ventes] = await db.query(
-                    'SELECT SUM(nombre_vendu) as total_vendus FROM ventes WHERE lot_id = ?',
+                const ventesLotResult = await db.query(
+                    'SELECT COALESCE(SUM(nombre_vendu), 0) as total_vendus FROM ventes WHERE lot_id = $1',
                     [lot.id]
                 );
-                const totalMorts = morts[0].total_morts || 0;
-                const totalVendus = ventes[0].total_vendus || 0;
+                const totalMorts = parseInt(mortsResult.rows[0].total_morts) || 0;
+                const totalVendus = parseInt(ventesLotResult.rows[0].total_vendus) || 0;
                 const restant = lot.nombre_initial - totalMorts - totalVendus;
                 if (restant > 0) totalVolailles += restant;
             }
@@ -319,21 +306,21 @@ const getFullDashboard = async (req, res) => {
 
         // 3. Alertes stock
         let alertesStock = 0;
-        for (const item of stockList) {
+        for (const item of stock) {
             if (item.quantite <= item.seuil_alerte) alertesStock++;
         }
 
         // 4. Vaccins programmés
-        const vaccinsProgrammes = vaccinsList.length;
+        const vaccinsProgrammes = vaccins.length;
 
         // 5. Lots récents
-        const lotsRecents = lotsList.slice(0, 5);
+        const lotsRecents = lots.slice(0, 5);
         for (let lot of lotsRecents) {
-            const [morts] = await db.query(
-                'SELECT SUM(mortalite_jour) as total_morts FROM suivi_quotidien WHERE lot_id = ?',
+            const mortsResult = await db.query(
+                'SELECT COALESCE(SUM(mortalite_jour), 0) as total_morts FROM suivi_quotidien WHERE lot_id = $1',
                 [lot.id]
             );
-            const totalMorts = morts[0].total_morts || 0;
+            const totalMorts = parseInt(mortsResult.rows[0].total_morts) || 0;
             lot.taux_mortalite = ((totalMorts / lot.nombre_initial) * 100).toFixed(2);
             
             const arrivee = new Date(lot.date_arrivee);
@@ -343,14 +330,14 @@ const getFullDashboard = async (req, res) => {
         }
 
         // 6. Alertes détaillées
-        const alertesStockDetail = stockList.filter(item => item.quantite <= item.seuil_alerte).map(item => ({
+        const alertesStockDetail = stock.filter(item => item.quantite <= item.seuil_alerte).map(item => ({
             ...item,
             alerte: true,
             message_alerte: "ATTENTION : Stock faible"
         }));
 
         const aujourdhui = new Date();
-        const alertesVaccinsDetail = vaccinsList.filter(v => {
+        const alertesVaccinsDetail = vaccins.filter(v => {
             const dateProgrammee = new Date(v.date_programmee);
             const diffJours = Math.ceil((dateProgrammee - aujourdhui) / (1000 * 60 * 60 * 24));
             return diffJours <= 3 && diffJours >= 0;
@@ -366,7 +353,7 @@ const getFullDashboard = async (req, res) => {
         // 7. Ventes mensuelles
         const ventesParMois = {};
         let chiffreAffairesTotal = 0;
-        for (const vente of ventesList) {
+        for (const vente of ventes) {
             const date = new Date(vente.date_vente);
             const mois = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
             const montant = vente.nombre_vendu * parseFloat(vente.prix_unitaire);
@@ -379,11 +366,11 @@ const getFullDashboard = async (req, res) => {
         }
 
         // 8. Taux de mortalité mensuel
-        const mortaliteData = mortaliteList.map(item => ({
+        const mortaliteFormatted = mortaliteData.map(item => ({
             mois: item.mois,
             taux: item.total_initial > 0 ? parseFloat(((item.total_morts / item.total_initial) * 100).toFixed(1)) : 0,
-            total_morts: item.total_morts,
-            total_initial: item.total_initial
+            total_morts: parseInt(item.total_morts),
+            total_initial: parseInt(item.total_initial)
         }));
 
         res.json({
@@ -398,7 +385,7 @@ const getFullDashboard = async (req, res) => {
             alertesVaccins: alertesVaccinsDetail,
             ventesMensuelles: ventesParMois,
             chiffreAffairesTotal: chiffreAffairesTotal,
-            mortaliteMensuelle: mortaliteData
+            mortaliteMensuelle: mortaliteFormatted
         });
 
     } catch (error) {
