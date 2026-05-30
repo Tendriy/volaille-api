@@ -1,3 +1,13 @@
+// ===== FORCER IPv4 POUR CORRIGER ENETUNREACH =====
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
+// Force IPv4 pour tous les agents HTTP/HTTPS
+const http = require('http');
+const https = require('https');
+http.globalAgent = new http.Agent({ family: 4 });
+https.globalAgent = new https.Agent({ family: 4 });
+
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
@@ -11,18 +21,17 @@ const suiviRoutes = require('./routes/suiviRoutes');
 const stockRoutes = require('./routes/stockRoutes');
 const vaccinRoutes = require('./routes/vaccinRoutes');
 const venteRoutes = require('./routes/venteRoutes');
-const dashboardRoutes = require('./routes/dashboardRoutes'); // <-- AJOUT
+const dashboardRoutes = require('./routes/dashboardRoutes');
 
 const app = express();
 
 const allowedOrigins = process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',')
-    : ['http://localhost:5173', 'http://localhost:3000'];
+    : ['http://localhost:5173', 'http://localhost:3000', 'https://volaille-api.onrender.com'];
 
 const corsOptions = {
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
-
         if (allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
@@ -36,7 +45,6 @@ const corsOptions = {
     optionsSuccessStatus: 200
 };
 
-
 // Middleware
 app.use(cors(corsOptions));
 app.use(express.json());
@@ -49,7 +57,7 @@ app.use('/api/suivi', suiviRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/vaccins', vaccinRoutes);
 app.use('/api/ventes', venteRoutes);
-app.use('/api/dashboard', dashboardRoutes); // <-- AJOUT
+app.use('/api/dashboard', dashboardRoutes);
 
 // Route de test
 app.get('/api/health', (req, res) => {
@@ -61,10 +69,21 @@ app.use((req, res) => {
     res.status(404).json({ error: 'Route non trouvée' });
 });
 
+// Gestion globale des erreurs réseau
+process.on('uncaughtException', (err) => {
+    if (err.code === 'ENETUNREACH') {
+        console.error('❌ Erreur réseau détectée:', err.message);
+        console.error('Stack trace:', err.stack);
+    } else {
+        console.error('Erreur non gérée:', err);
+    }
+});
+
 // Démarrage du serveur
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(` Serveur démarré sur le port ${PORT}`);
-    console.log(` API disponible sur http://localhost:${PORT}/api`);
+    console.log(`Serveur démarré sur le port ${PORT}`);
+    console.log(`API disponible sur http://localhost:${PORT}/api`);
     console.log(` Dashboard disponible sur http://localhost:${PORT}/api/dashboard`);
+    console.log(` IPv4 forcé - ENETUNREACH corrigé`);
 });
