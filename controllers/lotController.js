@@ -6,8 +6,6 @@ const addLot = async (req, res) => {
     const { nom_lot, race, fournisseur, nombre_initial, date_arrivee } = req.body;
     const userId = req.userId;
 
-    console.log('=== addLot DEBUG ===');
-    console.log('Données reçues:', { nom_lot, race, fournisseur, nombre_initial, date_arrivee });
 
     try {
         // Vérifier si un lot actif avec le même nom existe déjà

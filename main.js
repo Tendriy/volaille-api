@@ -83,7 +83,4 @@ process.on('uncaughtException', (err) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Serveur démarré sur le port ${PORT}`);
-    console.log(`API disponible sur http://localhost:${PORT}/api`);
-    console.log(` Dashboard disponible sur http://localhost:${PORT}/api/dashboard`);
-    console.log(` IPv4 forcé - ENETUNREACH corrigé`);
-});
+  });

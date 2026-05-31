@@ -5,12 +5,34 @@ function calculTauxMortalite(nombreInitial, totalMorts) {
 }
 
 // Algorithme 2: Vérification du stock
-function verifierStock(quantite, seuil) {
-    if (quantite <= seuil) {
-        return { alerte: true, message: "ATTENTION : Stock faible" };
+const POIDS_SAC_KG = 50;
+
+function verifierStock(quantite, seuilKg, quantiteUnit = "kg") {
+    let quantiteKg = parseFloat(quantite);
+    let seuil = parseFloat(seuilKg);
+    
+    if (isNaN(quantiteKg)) quantiteKg = 0;
+    if (isNaN(seuil)) seuil = 0;
+    
+    if (quantiteUnit === 'sac') {
+        quantiteKg = quantiteKg * POIDS_SAC_KG;
     }
+    
+    if (quantiteKg <= seuil) {
+        let message = "ATTENTION : Stock faible";
+        
+        if (quantiteUnit === 'sac') {
+            message = `ATTENTION : Stock faible (${quantite} sac${quantite > 1 ? 's' : ''} = ${quantiteKg.toFixed(2)} kg) - Seuil: ${seuil.toFixed(2)} kg`;
+        } else {
+            message = `ATTENTION : Stock faible (${quantiteKg.toFixed(2)} kg) - Seuil: ${seuil.toFixed(2)} kg`;
+        }
+        
+        return { alerte: true, message: message };
+    }
+    
     return { alerte: false, message: "Stock suffisant" };
 }
+
 
 // Algorithme 3: Calcul de l'âge des volailles
 function calculerAge(dateArrivee) {

@@ -37,7 +37,7 @@ const getAllStock = async (req, res) => {
 
         // Appliquer algorithme de vérification du stock (Algorithme 11.2)
         const stockAvecAlertes = stock.map(item => {
-            const verification = verifierStock(item.quantite, item.seuil_alerte);
+            const verification = verifierStock(item.quantite, item.seuil_alerte, item.unite);
             return {
                 ...item,
                 alerte: verification.alerte,

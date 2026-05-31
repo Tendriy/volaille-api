@@ -26,7 +26,7 @@ class Stock {
         // Ajouter les alertes
         return stock.map(item => ({
             ...item,
-            ...verifierStock(item.quantite, item.seuil_alerte)
+            ...verifierStock(item.quantite, item.seuil_alerte, item.unite)
         }));
     }
 
